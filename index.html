@@ -5,32 +5,60 @@
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
     <title>Unity Web Player | FazendaDaSorte</title>
     <style>
-      /* Apply a nice background to the whole page */
+      /* Background */
       body {
-        background-color: #1a1c2c; /* Deep dark blue/purple */
-        background-image: 
-          radial-gradient(at 50% 50%, #2a2e45 0%, #1a1c2c 100%);
+        background-color: #1a1c2c;
+        background-image: radial-gradient(at 50% 50%, #2a2e45 0%, #1a1c2c 100%);
         margin: 0;
-        padding-top: 0px; /* Space from the top */
-        overflow-x: hidden;
+        padding-top: 0px;
+        overflow: hidden; /* Prevent scrolling during loading */
       }
 
-      /* Use 'outline' instead of 'border' because outline does not add to the width/height */
+      /* Game Canvas styling (Desktop) */
       #unity-canvas {
         display: block;
-        margin: 0 auto; /* Centers the canvas horizontally */
-        outline: 8px solid #333; /* The Frame */
+        margin: 0 auto;
+        outline: 8px solid #333;
         border-radius: 4px;
-        box-shadow: 0 0 40px rgba(0,0,0,0.8); /* Depth shadow */
+        box-shadow: 0 0 40px rgba(0,0,0,0.8);
         background: url('Build/Web.jpg') center / cover;
       }
 
-      /* Optional: A simple title above the game */
+      /* Game Title styling */
       .game-title {
         color: rgb(188, 201, 14);
         font-family: sans-serif;
         margin-bottom: 8px;
         text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+      }
+
+      /* --- Tap to Play Screen Styling --- */
+      #tap-to-play-screen {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.9); /* Translucent black */
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        z-index: 1000; /* Ensure it's on top of everything */
+        cursor: pointer; /* Visually indicate it's clickable */
+      }
+
+      #tap-to-play-screen h1 {
+        color: white;
+        font-family: sans-serif;
+        font-size: 3em;
+        margin-bottom: 20px;
+      }
+
+      #tap-to-play-screen p {
+        color: #ddd;
+        font-family: sans-serif;
+        font-size: 1.5em;
       }
     </style>
   </head>
@@ -39,106 +67,107 @@
 
     <h2 class="game-title">Fazenda Da Sorte</h2>
 
-    <canvas id="unity-canvas" width=622 height=700 tabindex="-1" style="width: 622px; height: 700px;"></canvas>
+    <div id="unity-container" style="display:none;">
+      <canvas id="unity-canvas" width=622 height=700 tabindex="-1" style="width: 622px; height: 700px;"></canvas>
+    </div>
+
+    <div id="tap-to-play-screen">
+      <h1>Tap to Play!</h1>
+      <p>Tap anywhere to enable sound and start the game.</p>
+    </div>
 
     <script src="Build/Web.loader.js"></script>
     <script>
-      /* --- START OF AUDIO UNLOCK CODE --- */
-      // This section must run BEFORE the Unity Instance is created.
-
-      let unityInstanceVar; // Variable to store the Unity instance
+      const tapToPlayScreen = document.getElementById('tap-to-play-screen');
+      const unityContainer = document.getElementById('unity-container');
+      const canvas = document.querySelector("#unity-canvas");
       let audioContext;
 
-      // Function to attempt to unlock audio
-      function unlockAudio() {
-        console.log("Interaction detected. Attempting to unlock audio...");
+      // This function handles the tap event and starts the game
+      function handleGameStart() {
+        console.log("Game start triggered by user gesture.");
 
+        // Unhide the game and hide the tap screen
+        unityContainer.style.display = "block";
+        tapToPlayScreen.style.display = "none";
+
+        // Remove the event listeners to clean up
+        tapToPlayScreen.removeEventListener('click', handleGameStart);
+        tapToPlayScreen.removeEventListener('touchend', handleGameStart); // Important for mobile
+
+        // --- Audio Unlock Logic ---
+        // Ensure AudioContext is defined. Note: webkitAudioContext is critical for iOS WebKit.
         if (!audioContext) {
-          // Check if AudioContext is available (Web Audio API)
           if (window.AudioContext || window.webkitAudioContext) {
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
           } else {
             console.warn("Web Audio API not supported in this browser.");
-            removeUnlockListeners(); // API missing, can't unlock.
-            return; 
+            startGameInstance(); // No API, cannot unlock, but try to start anyway.
+            return;
           }
         }
 
-        // If the context is 'suspended', try to resume it.
-        // This 'resume()' must be triggered by a user gesture on iOS.
+        // The resume() method is crucial for iOS WebKit.
+        // It must be called directly within this user-gesture-triggered handler.
         if (audioContext.state === 'suspended') {
+          console.log("AudioContext is suspended. Attempting to resume...");
           audioContext.resume().then(() => {
-            console.log('AudioContext Unlocked via User Gesture!');
-            // Once unlocked, sounds should play automatically.
-            
-            // Critical Step: After unlocking, you must tell the existing Unity 
-            // instance to refresh its own audio system.
-            if (unityInstanceVar) {
-              console.log("Refreshing Unity sound system...");
-              unityInstanceVar.SendMessage("InternalWebRequest", "RefreshAudioContext"); // Common Unity method
-            } else {
-              // We don't have the Unity instance yet. Wait for it to be created.
-              // When it is created, its standard internal initialization should
-              // find the already-unlocked AudioContext.
-            }
-
-            removeUnlockListeners(); // Unlock successful, clean up listeners.
+            console.log('AudioContext Unlocked!');
+            startGameInstance(); // Start Unity after successful unlock
           }).catch((err) => {
             console.error('Failed to resume AudioContext:', err);
+            startGameInstance(); // Resume failed, but start Unity as a fallback
           });
         } else if (audioContext.state === 'running') {
-            console.log('AudioContext is already running. Cleaning up listeners.');
-            removeUnlockListeners();
+          console.log('AudioContext is already running.');
+          startGameInstance(); // Start Unity immediately
         }
       }
 
-      function removeUnlockListeners() {
-        // Only one interaction is needed to unlock. Clean up to improve performance.
-        window.removeEventListener('click', unlockAudio);
-        window.removeEventListener('touchstart', unlockAudio);
-        window.removeEventListener('touchend', unlockAudio);
+      // This function initializes the Unity instance
+      function startGameInstance() {
+        // Only attempt to start if it hasn't already begun
+        if (typeof createUnityInstance === 'undefined') {
+          console.error("Unity Web Loader is not ready.");
+          return;
+        }
+
+        createUnityInstance(canvas, {
+          arguments: [],
+          dataUrl: "Build/Web.data",
+          frameworkUrl: "Build/Web.framework.js",
+          codeUrl: "Build/Web.wasm",
+          streamingAssetsUrl: "StreamingAssets",
+          companyName: "WillSoft",
+          productName: "FazendaDaSorte",
+          productVersion: "1.0",
+        }).then((instance) => {
+          console.log("Unity Instance Created.");
+        }).catch((message) => {
+          alert(message);
+        });
       }
 
-      // Attach the listener to the first interaction (click, touchstart, or touchend)
-      // This listener is 'one-off', only the first one to trigger wins.
-      window.addEventListener('click', unlockAudio);
-      window.addEventListener('touchstart', unlockAudio);
-      window.addEventListener('touchend', unlockAudio); // Include touchend for broader iOS support.
+      // Add the event listeners to the tap screen. 
+      // Click handles both desktop clicks and mobile taps (taps act as clicks).
+      // Touchend ensures maximum compatibility with iOS WebKit.
+      tapToPlayScreen.addEventListener('click', handleGameStart);
+      tapToPlayScreen.addEventListener('touchend', handleGameStart); // Best practice for mobile
 
-      /* --- END OF AUDIO UNLOCK CODE --- */
-
+      // Mobile check (remains same)
       if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
         var meta = document.createElement('meta');
         meta.name = 'viewport';
         meta.content = 'width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes';
         document.getElementsByTagName('head')[0].appendChild(meta);
 
-        var canvas = document.querySelector("#unity-canvas");
         canvas.style.width = "100%";
         canvas.style.height = "100%";
         canvas.style.position = "fixed";
-        canvas.style.outline = "none"; /* Remove frame on mobile to save space */
-
+        canvas.style.outline = "none";
         document.body.style.textAlign = "left";
         document.body.style.paddingTop = "0";
       }
-
-      // Capture the resulting instance in unityInstanceVar
-      createUnityInstance(document.querySelector("#unity-canvas"), {
-        arguments: [],
-        dataUrl: "Build/Web.data",
-        frameworkUrl: "Build/Web.framework.js",
-        codeUrl: "Build/Web.wasm",
-        streamingAssetsUrl: "StreamingAssets",
-        companyName: "WillSoft",
-        productName: "FazendaDaSorte",
-        productVersion: "1.0",
-      }).then((instance) => {
-          unityInstanceVar = instance; // Store the instance for potential audio refresh.
-          console.log("Unity Instance Created.");
-      }).catch((message) => {
-        alert(message);
-      });
     </script>
   </body>
 </html>
