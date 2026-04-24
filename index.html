@@ -43,6 +43,70 @@
 
     <script src="Build/Web.loader.js"></script>
     <script>
+      /* --- START OF AUDIO UNLOCK CODE --- */
+      // This section must run BEFORE the Unity Instance is created.
+
+      let unityInstanceVar; // Variable to store the Unity instance
+      let audioContext;
+
+      // Function to attempt to unlock audio
+      function unlockAudio() {
+        console.log("Interaction detected. Attempting to unlock audio...");
+
+        if (!audioContext) {
+          // Check if AudioContext is available (Web Audio API)
+          if (window.AudioContext || window.webkitAudioContext) {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+          } else {
+            console.warn("Web Audio API not supported in this browser.");
+            removeUnlockListeners(); // API missing, can't unlock.
+            return; 
+          }
+        }
+
+        // If the context is 'suspended', try to resume it.
+        // This 'resume()' must be triggered by a user gesture on iOS.
+        if (audioContext.state === 'suspended') {
+          audioContext.resume().then(() => {
+            console.log('AudioContext Unlocked via User Gesture!');
+            // Once unlocked, sounds should play automatically.
+            
+            // Critical Step: After unlocking, you must tell the existing Unity 
+            // instance to refresh its own audio system.
+            if (unityInstanceVar) {
+              console.log("Refreshing Unity sound system...");
+              unityInstanceVar.SendMessage("InternalWebRequest", "RefreshAudioContext"); // Common Unity method
+            } else {
+              // We don't have the Unity instance yet. Wait for it to be created.
+              // When it is created, its standard internal initialization should
+              // find the already-unlocked AudioContext.
+            }
+
+            removeUnlockListeners(); // Unlock successful, clean up listeners.
+          }).catch((err) => {
+            console.error('Failed to resume AudioContext:', err);
+          });
+        } else if (audioContext.state === 'running') {
+            console.log('AudioContext is already running. Cleaning up listeners.');
+            removeUnlockListeners();
+        }
+      }
+
+      function removeUnlockListeners() {
+        // Only one interaction is needed to unlock. Clean up to improve performance.
+        window.removeEventListener('click', unlockAudio);
+        window.removeEventListener('touchstart', unlockAudio);
+        window.removeEventListener('touchend', unlockAudio);
+      }
+
+      // Attach the listener to the first interaction (click, touchstart, or touchend)
+      // This listener is 'one-off', only the first one to trigger wins.
+      window.addEventListener('click', unlockAudio);
+      window.addEventListener('touchstart', unlockAudio);
+      window.addEventListener('touchend', unlockAudio); // Include touchend for broader iOS support.
+
+      /* --- END OF AUDIO UNLOCK CODE --- */
+
       if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
         var meta = document.createElement('meta');
         meta.name = 'viewport';
@@ -59,6 +123,7 @@
         document.body.style.paddingTop = "0";
       }
 
+      // Capture the resulting instance in unityInstanceVar
       createUnityInstance(document.querySelector("#unity-canvas"), {
         arguments: [],
         dataUrl: "Build/Web.data",
@@ -68,7 +133,9 @@
         companyName: "WillSoft",
         productName: "FazendaDaSorte",
         productVersion: "1.0",
-      }).then((unityInstance) => {
+      }).then((instance) => {
+          unityInstanceVar = instance; // Store the instance for potential audio refresh.
+          console.log("Unity Instance Created.");
       }).catch((message) => {
         alert(message);
       });
